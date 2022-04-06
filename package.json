@@ -1,0 +1,29 @@
+{
+  "author": "taichunmin <taichunmin@gmail.com>",
+  "license": "MIT",
+  "main": "dist/proxmark3.js",
+  "name": "proxmark3.js",
+  "repository": "git@github.com:taichunmin/proxmark3.js.git",
+  "type": "module",
+  "version": "0.1.0",
+  "devDependencies": {
+    "@rollup/plugin-json": "^4.1.0",
+    "eslint": "^8.12.0",
+    "eslint-config-standard": "^16.0.3",
+    "eslint-plugin-import": "^2.26.0",
+    "eslint-plugin-node": "^11.1.0",
+    "eslint-plugin-promise": "^6.0.0",
+    "jest": "^27.5.1",
+    "rollup": "^2.70.1",
+    "rollup-plugin-terser": "^7.0.2"
+  },
+  "scripts": {
+    "build": "yarn lint && rollup --config",
+    "lint": "eslint --ext .js --fix .",
+    "repl": "node --experimental-repl-await repl.js",
+    "test": "jest"
+  },
+  "dependencies": {
+    "lodash": "^4.17.21"
+  }
+}
