@@ -1,12 +1,12 @@
-import BufferLE from './BufferLE'
+import Packet from './Packet.js'
 
 export default class PacketResponseOLD {
-  constructor (buf) {
-    if (!buf || !(buf instanceof BufferLE)) throw new TypeError('invalid buf')
-    this.buf = buf
-    this.data = buf.subarray(32)
+  constructor (pack) {
+    if (!pack || !(pack instanceof Packet)) throw new TypeError('invalid pack')
+    this.pack = pack
+    this.data = pack.subarray(32)
   }
 
-  get cmd () { return Number(BigInt.asUintN(16, this.buf.getBigUint64(0))) }
-  getArg (index) { return this.buf.getBigUint64(8 + (index << 3)) }
+  get cmd () { return this.pack.getUint16(0) }
+  getArg (index) { return this.pack.getBigUint64(8 + (index << 3)) }
 }

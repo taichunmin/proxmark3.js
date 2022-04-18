@@ -1,29 +1,36 @@
+import _ from 'lodash'
 import json from '@rollup/plugin-json'
 import { terser } from 'rollup-plugin-terser'
 
 const configBrowser = {
   format: 'umd',
-  name: 'Proxmark3',
   globals: {
     lodash: '_',
   },
 }
 
-export default {
-  input: 'src/main.js',
+const configs = _.map([
+  { name: 'Proxmark3', input: 'main', output: 'proxmark3' },
+  { name: 'Pm3Waveshare', input: 'plugin/Waveshare', output: 'plugin/waveshare' },
+], arg => ({
+  input: `src/${arg.input}.js`,
   plugins: [json()],
   external: [
     'lodash',
   ],
   output: [
     {
-      file: 'dist/proxmark3.js',
       ...configBrowser,
+      name: arg.name,
+      file: `dist/${arg.output}.js`,
     },
     {
-      file: 'dist/proxmark3.min.js',
-      plugins: [terser()],
       ...configBrowser,
+      name: arg.name,
+      file: `dist/${arg.output}.min.js`,
+      plugins: [terser()],
     },
   ],
-}
+}))
+
+export default configs

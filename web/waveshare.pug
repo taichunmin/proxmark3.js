@@ -1,0 +1,45 @@
+extends /layout/default
+
+block beforehtml
+  - const title = 'PM3 for Waveshare'
+
+block style
+  style
+    :sass
+      [v-cloak]
+        display: none
+      body, .h1, .h2, .h3, .h4, .h5, .h6, h1, h2, h3, h4, h5, h6
+        font-family: 'Noto Sans TC', sans-serif
+
+block content
+  #app.my-3.container(v-cloak)
+    h2.mb-3.text-center= title
+
+block script
+  //- .min
+  script(crossorigin="anonymous", src=`${baseurl}plugin/waveshare${NODE_ENV === 'production' ? '.min' : ''}.js`)
+  script.
+    const { Proxmark3 } = window.Proxmark3
+    const pm3 = new Proxmark3()
+    pm3.use(new window.Pm3Waveshare())
+    window.vm = new Vue({
+      el: '#app',
+      data: {
+        h: {},
+      },
+      async mounted () {
+        // 自動儲存功能
+        try {
+          const saved = JSON5.parse(localStorage.getItem(location.pathname))
+          if (saved) this.$set(this, 'h', { ...this.h, ...saved })
+        } catch (err) {}
+        this.$watch('h', () => {
+          localStorage.setItem(location.pathname, JSON5.stringify(this.h))
+        }, { deep: true })
+
+        await this.init()
+      },
+      methods: {
+        async init () {},
+      },
+    })

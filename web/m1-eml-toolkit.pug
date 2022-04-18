@@ -1,0 +1,266 @@
+extends /layout/default
+
+block beforehtml
+  - const title = 'Mifare 1k EML 工具'
+
+block style
+  meta(property="og:description", content=title)
+  meta(property="og:locale", content="zh_TW")
+  meta(property="og:title", content=title)
+  meta(property="og:type", content="website")
+  meta(property="og:url", content=`${baseurl}m1-eml-toolkit.html`)
+  style
+    :sass
+      [v-cloak]
+        display: none
+      body, .h1, .h2, .h3, .h4, .h5, .h6, h1, h2, h3, h4, h5, h6
+        font-family: 'Noto Sans TC', sans-serif
+
+block content
+  #app.my-3.container.text-monospace(v-cloak)
+    h3.mb-3.text-center= title
+    .form-group
+      label.mb-1 PM3 emulator memory
+      .d-flex
+        button.btn.btn-success.mr-1(@click="btnReadFlash") 讀取資料
+        button.btn.btn-primary.mr-1(@click="btnVerifyFlash") 比對資料
+        button.btn.btn-danger.mr-1(@click="btnWriteFlash") 寫入模擬
+    .form-group
+      label.mb-1 Magic Card: UID
+      .d-flex
+        button.btn.btn-success.mr-1(@click="btnReadGen1") 讀取資料
+        button.btn.btn-primary.mr-1(@click="btnVerifyGen1") 比對資料
+        button.btn.btn-danger.mr-1(@click="btnWriteGen1") 寫入資料
+    .form-group
+      label.mb-1 Magic Card: CUID, FUID, UFUID
+      .d-flex
+        button.btn.btn-success.mr-1(@click="btnReadGen2") 讀取資料
+        button.btn.btn-primary.mr-1(@click="btnVerifyGen2") 比對資料
+        button.btn.btn-danger.mr-1(@click="btnWriteGen2") 寫入資料
+    .form-group
+      label.mb-1 Common
+      .d-flex
+        button.btn.btn-success.mr-1(@click="btnLoadKeysFromEml") 從 EML 提取 keys
+        button.btn.btn-warning.mr-1(@click="btnSetBlankEml") 設定成空白 EML
+    .d-flex.mx-n1
+      .form-group.mx-1(style="flex: 12")
+        label M1 卡的 keys
+        textarea.form-control.form-control-sm(rows="65", v-model="h.keys")
+      .form-group.mx-1(style="flex: 32")
+        label M1 卡的 EML
+        textarea.form-control.form-control-sm(rows="65", v-model="h.eml")
+
+block script
+  script.
+    const { Mifare1k, Packet, Proxmark3, utils: { retry } } = window.Proxmark3
+    const pm3 = new Proxmark3()
+    window.vm = new Vue({
+      el: '#app',
+      data: {
+        h: {
+          eml: '',
+          keys: '',
+        },
+      },
+      async mounted () {
+        // 自動儲存功能
+        try {
+          const saved = JSON5.parse(localStorage.getItem(location.pathname))
+          if (saved) this.$set(this, 'h', { ...this.h, ...saved })
+        } catch (err) {}
+        this.$watch('h', () => {
+          localStorage.setItem(location.pathname, JSON5.stringify(this.h))
+        }, { deep: true })
+      },
+      computed: {
+        card () {
+          try {
+            return Mifare1k.fromEml(this.h.eml)
+          } catch (err) {
+            return null
+          }
+        },
+        keys () {
+          const keys = Packet.fromHex(this.h.keys)
+          return keys.byteLength % 6 ? null : keys
+        },
+      },
+      methods: {
+        async btnReadFlash () {
+          try {
+            this.showLoading('請稍候', '正在從 PM3 讀取')
+            const card = new Mifare1k()
+            for (let i = 0; i < 64; i++) card.setBlock(i, await retry(() => pm3.cmdMfEget(i)))
+            this.setCard(card)
+            await Swal.fire({ icon: 'success', title: '讀取成功' })
+          } catch (err) {
+            console.error(err)
+            await Swal.fire({ icon: 'error', title: '讀取失敗', text: err.message })
+          }
+        },
+        async btnVerifyFlash () {
+          try {
+            this.showLoading('請稍候', '正在從 PM3 讀取')
+            const other = new Mifare1k()
+            for (let i = 0; i < 64; i++) other.setBlock(i, await retry(() => pm3.cmdMfEget(i)))
+            console.log({ card: this.card, other })
+            if (!other.isEqual(this.card)) throw new Error('卡片資料不同')
+            await Swal.fire({ icon: 'success', title: '卡片資料相同' })
+          } catch (err) {
+            console.error(err)
+            await Swal.fire({ icon: 'error', title: '比對失敗', text: err.message })
+          }
+        },
+        async btnWriteFlash () {
+          try {
+            if (!await this.confirm('即將覆蓋 PM3 記憶體資料，是否繼續？', '繼續', '取消')) return
+            this.showLoading('請稍候', '正在寫入 PM3 並模擬卡片')
+            if (!this.card) throw new TypeError('EML 資料有誤')
+            for (let i = 0; i < 64; i++) {
+              await pm3.cmdMfEset(this.card.getBlock(i), i)
+            }
+            await pm3.cmdMfSim({ type: '1k' })
+            await Swal.fire({ icon: 'success', title: '模擬成功' })
+          } catch (err) {
+            console.error(err)
+            await Swal.fire({ icon: 'error', title: '模擬失敗', text: err.message })
+          }
+        },
+        async btnReadGen1 () {
+          try {
+            this.showLoading('請稍候', '正在讀取 UID 卡')
+            const { errors, card } = await pm3.mfReadMagicCard({ type: '1k' })
+            this.setCard(new Mifare1k(card))
+            if (!errors.length) return await Swal.fire({ icon: 'success', title: '讀取成功' })
+            const failedBlocks = _.filter(_.map(errors, 'data.blockNo'), _.isInteger)
+            await Swal.fire({ icon: 'error', title: `${failedBlocks.length} 個 block 讀取失敗`, text: `失敗的 block: ${failedBlocks.join()}` })
+          } catch (err) {
+            console.error(err)
+            await Swal.fire({ icon: 'error', title: '讀取失敗', text: err.message })
+          }
+        },
+        async btnVerifyGen1 () {
+          try {
+            this.showLoading('請稍候', '正在讀取 UID 卡')
+            const { errors, card: other } = await pm3.mfReadMagicCard({ type: '1k' })
+            if (errors.length) {
+              const failedBlocks = _.filter(_.map(errors, 'data.blockNo'), _.isInteger)
+              return await Swal.fire({ icon: 'error', title: `${failedBlocks.length} 個 block 讀取失敗`, text: `失敗的 block: ${failedBlocks.join()}` })
+            }
+            console.log({ card: this.card, other })
+            if (!other.isEqual(this.card.pack)) throw new Error('卡片資料不同')
+            await Swal.fire({ icon: 'success', title: '卡片資料相同' })
+          } catch (err) {
+            console.error(err)
+            await Swal.fire({ icon: 'error', title: '比對失敗', text: err.message })
+          }
+        },
+        async btnWriteGen1 () {
+          try {
+            if (!await this.confirm('即將覆蓋 UID 卡資料，是否繼續？', '繼續', '取消')) return
+            this.showLoading('請稍候', '正在寫入 UID 卡')
+            if (!this.card) throw new TypeError('EML 資料有誤')
+            const { errors } = await pm3.mfWriteMagicCard({ card: this.card.pack })
+            if (!errors.length) return await Swal.fire({ icon: 'success', title: '寫入成功' })
+            const failedBlocks = _.filter(_.map(errors, 'data.blockNo'), _.isInteger)
+            await Swal.fire({ icon: 'error', title: `${failedBlocks.length} 個 block 寫入失敗`, text: `失敗的 block: ${failedBlocks.join()}` })
+          } catch (err) {
+            console.error(err)
+            await Swal.fire({ icon: 'error', title: '寫入失敗', text: err.message })
+          }
+        },
+        async btnReadGen2 () {
+          try {
+            this.showLoading('請稍候', '正在讀取 CUID 卡')
+            const { errors, card } = await pm3.mfReadCard({ keys: this.keys })
+            this.setCard(new Mifare1k(card))
+            if (!errors.length) return await Swal.fire({ icon: 'success', title: '讀取成功' })
+            const failedSectors = _.filter(_.map(errors, 'data.sectorNo'), _.isInteger)
+            await Swal.fire({ icon: 'error', title: `${failedSectors.length} 個 sector 讀取失敗`, text: `失敗的 sector: ${failedSectors.join()}` })
+          } catch (err) {
+            console.error(err)
+            await Swal.fire({ icon: 'error', title: '讀取失敗', text: err.message })
+          }
+        },
+        async btnVerifyGen2 () {
+          try {
+            this.showLoading('請稍候', '正在讀取 CUID 卡')
+            const { errors, card: other } = await pm3.mfReadCard({ keys: this.keys })
+            if (errors.length) {
+              const failedSectors = _.filter(_.map(errors, 'data.sectorNo'), _.isInteger)
+              return await Swal.fire({ icon: 'error', title: `${failedSectors.length} 個 sector 讀取失敗`, text: `失敗的 sector: ${failedSectors.join()}` })
+            }
+            console.log({ card: this.card, other })
+            if (!other.isEqual(this.card.pack)) throw new Error('卡片資料不同')
+            await Swal.fire({ icon: 'success', title: '卡片資料相同' })
+          } catch (err) {
+            console.error(err)
+            await Swal.fire({ icon: 'error', title: '比對失敗', text: err.message })
+          }
+        },
+        async btnWriteGen2 () {
+          try {
+            if (!await this.confirm('即將覆蓋 CUID 卡資料，是否繼續？', '繼續', '取消')) return
+            this.showLoading('請稍候', '正在寫入 CUID 卡')
+            if (!this.card) throw new TypeError('EML 資料有誤')
+            const { errors } = await pm3.mfWriteCard({ keys: this.keys, card: this.card.pack })
+            if (!errors.length) return await Swal.fire({ icon: 'success', title: '寫入成功' })
+            const failedBlocks = _.filter(_.map(errors, 'data.blockNo'), _.isInteger)
+            await Swal.fire({ icon: 'error', title: `${failedBlocks.length} 個 block 寫入失敗`, text: `失敗的 block: ${failedBlocks.join()}` })
+          } catch (err) {
+            console.error(err)
+            await Swal.fire({ icon: 'error', title: '寫入失敗', text: err.message })
+          }
+        },
+        async btnLoadKeysFromEml () {
+          try {
+            const card = this.card
+            if (!card) throw new Error('invalid EML')
+            this.setKeys([
+              ...card.keys,
+              ...Packet.fromHex('FFFFFFFFFFFF 000000000000 A0A1A2A3A4A5 D3F7D3F7D3F7').chunk(6),
+            ])
+          } catch (err) {
+            console.error(err)
+            await Swal.fire({ icon: 'error', title: '發生錯誤', text: err.message })
+          }
+        },
+        async btnSetBlankEml () {
+          if (!await this.confirm('即將設定成空白 EML，是否繼續？', '繼續', '取消')) return
+          const eml = new Packet(1024)
+          eml.set(Packet.fromHex('0102030404080400000000000000BEAF'), 0)
+          const keyBlock = Packet.fromHex('FFFFFFFFFFFF08778F00FFFFFFFFFFFF')
+          for (let i = 0; i<16; i++) eml.set(keyBlock, i * 64 + 48)
+          this.setCard(new Mifare1k(eml))
+        },
+        setCard (card) {
+          if (!(card instanceof Mifare1k)) throw new TypeError('invalid card')
+          this.$set(this.h, 'eml', card.eml)
+        },
+        setKeys (keys) {
+          this.$set(this.h, 'keys', Mifare1k.keysToHexUniq(keys))
+        },
+        async confirm (text, btnConfirm, btnCancel) {
+          const args = {
+            cancelButtonColor: '#3085d6',
+            cancelButtonText: btnCancel,
+            confirmButtonColor: '#d33',
+            confirmButtonText: btnConfirm,
+            focusCancel: true,
+            icon: 'warning',
+            showCancelButton: true,
+            text,
+          }
+          return (await Swal.fire(args))?.isConfirmed
+        },
+        showLoading (title, text) {
+          Swal.fire({
+            title,
+            text,
+            allowOutsideClick: false,
+            showConfirmButton: false,
+            willOpen: () => { Swal.showLoading() },
+          })
+        },
+      },
+    })

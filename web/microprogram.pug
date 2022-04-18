@@ -1,0 +1,88 @@
+extends /layout/default
+
+block beforehtml
+  - const title = 'Microprogram Identity Card'
+
+block style
+  meta(property="og:description", content=title)
+  meta(property="og:locale", content="zh_TW")
+  meta(property="og:title", content=title)
+  meta(property="og:type", content="website")
+  meta(property="og:url", content=`${baseurl}microprogram.html`)
+  style
+    :sass
+      [v-cloak]
+        display: none
+      body, .h1, .h2, .h3, .h4, .h5, .h6, h1, h2, h3, h4, h5, h6
+        font-family: 'Noto Sans TC', sans-serif
+
+block content
+  #app.my-3.container(v-cloak)
+    h3.mb-3.text-center= title
+    .card
+      h5.card-header 讀取微程式識別證
+      .card-body
+        .input-group.mb-3
+          .input-group-prepend: span.input-group-text 員工編號
+          input.form-control(readonly, :value="mpid")
+        .input-group.mb-3
+          .input-group-prepend: span.input-group-text 英文名稱
+          input.form-control(readonly, :value="user")
+        button.btn.btn-block.btn-primary(type="button", @click="btnReadMpCard") 讀取卡片
+
+block script
+  script.
+    const { Packet, Proxmark3 } = window.Proxmark3
+    const pm3 = new Proxmark3()
+    window.vm = new Vue({
+      el: '#app',
+      data: {
+        mpid: '',
+        user: '',
+        h: {
+          block: {
+            target: 0,
+            keyHex: '',
+            keyType: '',
+            dataHex: '',
+          },
+        },
+      },
+      async mounted () {
+        // 自動儲存功能
+        try {
+          const saved = JSON5.parse(localStorage.getItem(location.pathname))
+          if (saved) this.$set(this, 'h', { ...this.h, ...saved })
+        } catch (err) {}
+        this.$watch('h', () => {
+          localStorage.setItem(location.pathname, JSON5.stringify(this.h))
+        }, { deep: true })
+      },
+      methods: {
+        async btnReadMpCard () {
+          try {
+            this.showLoading('讀取中')
+            const u8ToUtf8 = pack => _.trim(pack.utf8, '\x00')
+            const key = Packet.fromHex('5a11475e39f5')
+            const u8Sector1 = await pm3.cmdMfRdSc(1, 0, key)
+            this.user = u8ToUtf8(u8Sector1.subarray(0, 16))
+            this.mpid = u8ToUtf8(u8Sector1.subarray(16, 32))
+            //- this.user = u8ToUtf8(await pm3.cmdMfRdBl(4, 0, key))
+            //- this.mpid = u8ToUtf8(await pm3.cmdMfRdBl(5, 0, key))
+            Swal.close()
+          } catch (err) {
+            console.error(err)
+            Swal.fire({ icon: 'error', title: '讀取失敗', text: err.message })
+          }
+        },
+        showLoading (title, text) {
+          Swal.fire({
+            title,
+            text,
+            allowOutsideClick: false,
+            showConfirmButton: false,
+            willOpen: () => { Swal.showLoading() },
+          })
+        },
+      },
+    })
