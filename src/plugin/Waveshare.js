@@ -65,7 +65,7 @@ export default class Pm3Waveshare {
     return {
       MODEL,
 
-      // await pm3.$waveshare.draw_1in54B({ black: new Packet(5000).fill(0xFF), red: new Packet(5000).fill(0xF0) })
+      // await pm3.$waveshare.draw_1in54B({ black: new window.Proxmark3.Packet(5000).fill(0xFF), red: new window.Proxmark3.Packet(5000).fill(0xF0) })
       draw_1in54B: async ({ black, red }) => {
         try {
           // check black and red data
