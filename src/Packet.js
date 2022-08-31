@@ -46,8 +46,9 @@ export default class Packet extends Uint8Array {
   }
 
   // 共通屬性
-  get hex () { return _.map(this, b => `0${b.toString(16)}`.slice(-2)).join('').toUpperCase() }
-  get rhex () { return _.map(this, b => `0${b.toString(16)}`.slice(-2)).reverse().join('').toUpperCase() }
+  get hex () { return _.map(this, b => (b + 0x100).toString(16).slice(-2)).join('').toUpperCase() }
+  get rhex () { return _.map(this, b => (b + 0x100).toString(16).slice(-2)).reverse().join('').toUpperCase() }
+  get inspect () { return _.map(this, b => (b + 0x100).toString(16).slice(-2)).join(' ').toUpperCase() }
   get utf8 () { return new TextDecoder().decode(this) }
   get base64url () {
     const tmp = []
