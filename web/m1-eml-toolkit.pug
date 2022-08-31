@@ -230,7 +230,7 @@ block script
           const eml = new Packet(1024)
           eml.set(Packet.fromHex('0102030404080400000000000000BEAF'), 0)
           const keyBlock = Packet.fromHex('FFFFFFFFFFFF08778F00FFFFFFFFFFFF')
-          for (let i = 0; i<16; i++) eml.set(keyBlock, i * 64 + 48)
+          for (let i = 0; i < 16; i++) eml.set(keyBlock, i * 64 + 48)
           this.setCard(new Mifare1k(eml))
         },
         setCard (card) {

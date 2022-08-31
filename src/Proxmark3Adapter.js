@@ -421,8 +421,7 @@ export default class Proxmark3Adapter {
 
   async waitRespTimeout (cmd, timeout = 25e2) {
     await this.open()
-    timeout += 100 // communication_delay 100ms
-    const ctx = { startedAt: Date.now(), finished: 0 }
+    const ctx = { finished: 0 }
     try {
       return await Promise.race([
         (async () => {
@@ -444,9 +443,10 @@ export default class Proxmark3Adapter {
           }
         })(),
         (async () => {
-          if (timeout < 0) return new Promise(resolve => {}) // 不設定 timeout
+          if (timeout > 0) timeout += 100 // communication_delay 100ms
+          ctx.startedAt = Date.now()
           while (!ctx.finished) {
-            const sleepts = ctx.startedAt + timeout - Date.now()
+            const sleepts = timeout > 0 ? ctx.startedAt + timeout - Date.now() : 1e3
             if (sleepts < 0) throw new Error(`waitRespTimeout ${timeout}ms`)
             await sleep(sleepts)
           }
