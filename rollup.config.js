@@ -10,8 +10,11 @@ const configBrowser = {
 }
 
 const configs = _.map([
+  { name: 'Pm3Hf14a', input: 'plugin/Hf14a', output: 'plugin/Hf14a' },
+  { name: 'Pm3LoggerRxTx', input: 'plugin/LoggerRxTx', output: 'plugin/LoggerRxTx' },
+  { name: 'Pm3Waveshare', input: 'plugin/Waveshare', output: 'plugin/Waveshare' },
+  { name: 'Pm3WebserialAdapter', input: 'plugin/WebserialAdapter', output: 'plugin/WebserialAdapter' },
   { name: 'Proxmark3', input: 'main', output: 'proxmark3' },
-  { name: 'Pm3Waveshare', input: 'plugin/Waveshare', output: 'plugin/waveshare' },
 ], arg => ({
   input: `src/${arg.input}.js`,
   plugins: [json()],

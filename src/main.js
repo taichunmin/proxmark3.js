@@ -1,4 +1,3 @@
-export { default as Mifare1k } from './Mifare1k.js'
 export { default as Packet } from './Packet.js'
 export { default as Proxmark3 } from './Proxmark3.js'
 export { version } from '../package.json'

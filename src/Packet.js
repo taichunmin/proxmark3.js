@@ -5,7 +5,7 @@ const BASE64URL_CHAR = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123
 export default class Packet extends Uint8Array {
   constructor (...args) {
     super(...args)
-    this.dv = new DataView(this.buffer, this.byteOffset, this.byteLength)
+    this.dv = new DataView(this.buffer, this.byteOffset, this.length)
   }
 
   static fromView (view) {
@@ -25,37 +25,41 @@ export default class Packet extends Uint8Array {
 
   static merge (...packs) {
     if (packs.length < 2) return packs.length ? packs[0] : new Packet()
-    const len = _.sumBy(packs, 'byteLength')
+    const len = _.sumBy(packs, 'length')
     const merged = new Packet(len)
     _.reduce(packs, (offset, pack) => {
       merged.set(pack, offset)
-      return offset + pack.byteLength
+      return offset + pack.length
     }, 0)
     return merged
   }
 
+  static isLen (pack, len = null) {
+    return !(pack instanceof Packet) || (!_.isNil(len) && pack.length !== len)
+  }
+
   isEqual (other) {
-    return this.byteLength === other.byteLength && this.every((v, k) => v === other[k])
+    return this.length === other.length && this.every((v, k) => v === other[k])
   }
 
   chunk (bytesPerChunk) {
     if (bytesPerChunk < 1) throw new TypeError('invalid bytesPerChunk')
     const chunks = []
-    for (let i = 0; i < this.byteLength; i += bytesPerChunk) chunks.push(this.subarray(i, i + bytesPerChunk))
+    for (let i = 0; i < this.length; i += bytesPerChunk) chunks.push(this.subarray(i, i + bytesPerChunk))
     return chunks
   }
 
   // 共通屬性
   get hex () { return _.map(this, b => (b + 0x100).toString(16).slice(-2)).join('').toUpperCase() }
   get rhex () { return _.map(this, b => (b + 0x100).toString(16).slice(-2)).reverse().join('').toUpperCase() }
-  get inspect () { return _.map(this, b => (b + 0x100).toString(16).slice(-2)).join(' ').toUpperCase() }
+  get inspect () { return `${_.map(this, b => (b + 0x100).toString(16).slice(-2)).join(' ').toUpperCase()} (len=${this.length})` }
   get utf8 () { return new TextDecoder().decode(this) }
   get base64url () {
     const tmp = []
-    for (let i = 0; i < this.byteLength; i += 3) {
+    for (let i = 0; i < this.length; i += 3) {
       let u24 = 0
-      for (let j = 0; j < 3; j++) u24 |= ((i + j) < this.byteLength ? this[i + j] : 0) << (16 - j * 8)
-      tmp.push(_.times(Math.min(this.byteLength - i + 1, 4), j => BASE64URL_CHAR[(u24 >> (18 - 6 * j)) & 0x3F]).join(''))
+      for (let j = 0; j < 3; j++) u24 |= ((i + j) < this.length ? this[i + j] : 0) << (16 - j * 8)
+      tmp.push(_.times(Math.min(this.length - i + 1, 4), j => BASE64URL_CHAR[(u24 >> (18 - 6 * j)) & 0x3F]).join(''))
     }
     return tmp.join('')
   }

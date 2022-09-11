@@ -26,7 +26,7 @@ export default class Pm3Waveshare {
     const { CMD, Packet, pm3, utils: { logTime, retry, sleep } } = context
 
     const sendCmd = async ({ ack = null, cmd, data = new Packet() }) => {
-      if (!(data instanceof Packet)) throw new TypeError('invalid data type')
+      if (!Packet.isLen(data)) throw new TypeError('invalid data type')
       const pack = Packet.merge(new Packet([0xCD, cmd]), data)
       // ISO14A_CONNECT = 1
       // ISO14A_NO_DISCONNECT = 2
@@ -35,8 +35,8 @@ export default class Pm3Waveshare {
       // ISO14A_NO_SELECT = 0x80
       // ISO14A_NO_RATS = 0x200
       // timeout 1s = 1356 / (8 * 16) * Math.min(timeout, 40542464) = 678000
-      await pm3.adapter.sendCommandMix({ cmd: CMD.HF_ISO14443A_READER, arg: [0x2AB, pack.byteLength], data: pack })
-      const resp = await pm3.adapter.waitRespTimeout(CMD.ACK, 3500)
+      await pm3.sendCommandMix({ cmd: CMD.HF_ISO14443A_READER, arg: [0x2AB, pack.byteLength], data: pack })
+      const resp = await pm3.waitRespTimeout(CMD.ACK, 3500)
       const rx = resp.data.subarray(0, Number(resp.getArg(0)))
       logTime('sendCmd resp =', rx.hex)
       if (_.isInteger(ack)) {
@@ -69,8 +69,8 @@ export default class Pm3Waveshare {
       draw_1in54B: async ({ black, red }) => {
         try {
           // check black and red data
-          if (!(black instanceof Packet) || black.byteLength !== 5000) throw new TypeError('invalid black type')
-          if (!(red instanceof Packet) || red.byteLength !== 5000) throw new TypeError('invalid red type')
+          if (!Packet.isLen(black, 5000)) throw new TypeError('invalid black')
+          if (!Packet.isLen(red, 5000)) throw new TypeError('invalid red')
 
           // select NFCTag, anti-collision and keep field on
           await retry(async () => {
@@ -142,7 +142,7 @@ export default class Pm3Waveshare {
         try {
           model = MODEL[model]
           if (model?.proto !== 1) throw new TypeError('invalid model')
-          if (!(black instanceof Packet) || black.byteLength * 8 !== model.width * model.height) throw new TypeError('invalid black type')
+          if (!Packet.isLen(black, model.width * model.height / 8)) throw new TypeError('invalid black type')
 
           // select NFCTag, anti-collision and keep field on
           await retry(async () => {

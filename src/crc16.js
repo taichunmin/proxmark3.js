@@ -52,7 +52,7 @@ const getPoly = (poly, refin) => {
 }
 
 const crc16Fast = (data, poly, crc, refin, refout) => {
-  if (!(data instanceof Packet)) throw new TypeError('invalid data type')
+  if (!Packet.isLen(data)) throw new TypeError('invalid data type')
   if (!data.byteLength) return ~crc
   const table = getPoly(poly, refin)
   if (refin) {

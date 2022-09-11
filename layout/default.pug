@@ -1,4 +1,6 @@
 doctype html
+-
+  const jsext = NODE_ENV === 'production' ? '.min.js' : '.js'
 block beforehtml
 html(lang="zh-Hant")
   head
@@ -36,4 +38,8 @@ html(lang="zh-Hant")
     script(crossorigin="anonymous", src="https://cdn.jsdelivr.net/npm/bootstrap@4/dist/js/bootstrap.min.js")
     //- proxmark3 require lodash
     script(crossorigin="anonymous", src=`${baseurl}proxmark3${NODE_ENV === 'production' ? '.min' : ''}.js`)
+    script(crossorigin="anonymous", src=`${baseurl}plugin/Hf14a${jsext}`)
+    script(crossorigin="anonymous", src=`${baseurl}plugin/LoggerRxTx${jsext}`)
+    script(crossorigin="anonymous", src=`${baseurl}plugin/Waveshare${jsext}`)
+    script(crossorigin="anonymous", src=`${baseurl}plugin/WebserialAdapter${jsext}`)
     block script
