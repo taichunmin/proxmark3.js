@@ -34,6 +34,8 @@ block script
   script.
     const { Packet, Proxmark3 } = window.Proxmark3
     const pm3 = new Proxmark3()
+    pm3.use(new window.Pm3WebserialAdapter())
+    pm3.use(new window.Pm3Hf14a())
     window.vm = new Vue({
       el: '#app',
       data: {
@@ -64,11 +66,9 @@ block script
             this.showLoading('讀取中')
             const u8ToUtf8 = pack => _.trim(pack.utf8, '\x00')
             const key = Packet.fromHex('5a11475e39f5')
-            const u8Sector1 = await pm3.cmdMfRdSc(1, 0, key)
+            const u8Sector1 = await pm3.$hf14a.mfReadSector(1, 0, key)
             this.user = u8ToUtf8(u8Sector1.subarray(0, 16))
             this.mpid = u8ToUtf8(u8Sector1.subarray(16, 32))
-            //- this.user = u8ToUtf8(await pm3.cmdMfRdBl(4, 0, key))
-            //- this.mpid = u8ToUtf8(await pm3.cmdMfRdBl(5, 0, key))
             Swal.close()
           } catch (err) {
             console.error(err)
