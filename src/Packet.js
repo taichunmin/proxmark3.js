@@ -35,7 +35,7 @@ export default class Packet extends Uint8Array {
   }
 
   static isLen (pack, len = null) {
-    return !(pack instanceof Packet) || (!_.isNil(len) && pack.length !== len)
+    return (pack instanceof Packet) && (_.isNil(len) || pack.length === len)
   }
 
   isEqual (other) {

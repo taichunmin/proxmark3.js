@@ -336,14 +336,14 @@ export class PacketResponseNG {
   constructor (pack) {
     if (!Packet.isLen(pack)) throw new TypeError('invalid pack')
     this.pack = pack
-    this.data = pack.subarray(10 + (this.ng ? 0 : 24), pack.byteLength - 2)
+    this.data = pack.subarray(10 + (this.ng ? 0 : 24), pack.length - 2)
   }
 
-  get len () { return this.pack.byteLength }
+  get len () { return this.pack.length }
   get ng () { return (this.pack.getUint8(5) & 0x80) > 0 }
   get status () { return this.pack.getInt16(6) }
   get cmd () { return this.pack.getUint16(8) }
-  get crc () { return this.pack.getUint16(this.pack.byteLength - 2) }
+  get crc () { return this.pack.getUint16(this.pack.length - 2) }
   getArg (index) { return this.pack.getBigUint64(10 + (index << 3)) }
 }
 
@@ -440,30 +440,30 @@ export default class Proxmark3 {
 
   async sendCommandNG ({ cmd, data = new Packet(), ng = true }) {
     if (!Packet.isLen(data)) throw new TypeError('data should be Packet')
-    if (data.byteLength > 512) throw new TypeError('data.byteLength > 512')
-    const pack = new Packet(data.byteLength + 10) // magic 4 + length 2 + cmd 2 + dataLen + crc 2
+    if (data.length > 512) throw new TypeError('data.length > 512')
+    const pack = new Packet(data.length + 10) // magic 4 + length 2 + cmd 2 + dataLen + crc 2
     pack.set(Packet.fromUtf8('PM3a'))
-    pack.setUint16(4, data.byteLength | (ng ? 0x8000 : 0))
+    pack.setUint16(4, data.length | (ng ? 0x8000 : 0))
     pack.setUint16(6, Number(BigInt.asUintN(16, BigInt(cmd))))
-    if (data.byteLength) pack.set(data, 8)
-    pack.set(Packet.fromUtf8('a3'), data.byteLength + 8) // COMMANDNG_POSTAMBLE_MAGIC = a3
+    if (data.length) pack.set(data, 8)
+    pack.set(Packet.fromUtf8('a3'), data.length + 8) // COMMANDNG_POSTAMBLE_MAGIC = a3
     await this.writePacket(pack)
   }
 
   async sendCommandMix ({ cmd, arg = [], data = new Packet() }) {
     if (!Packet.isLen(data)) throw new TypeError('data should be Packet')
-    if (data.byteLength > 488) throw new TypeError('data.byteLength > 488')
-    const pack = new Packet(data.byteLength + 24) // mix format: 3 * arg 8
-    if (data.byteLength) pack.set(data, 24)
+    if (data.length > 488) throw new TypeError('data.length > 488')
+    const pack = new Packet(data.length + 24) // mix format: 3 * arg 8
+    if (data.length) pack.set(data, 24)
     for (let i = 0; i < 3; i++) pack.setBigUint64(i << 3, BigInt(arg[i] ?? 0))
     return await this.sendCommandNG({ cmd, data: pack, ng: false })
   }
 
   async sendCommandOLD ({ cmd, arg = [], data = new Packet() }) {
     if (!Packet.isLen(data)) throw new TypeError('data should be Packet')
-    if (data.byteLength > 512) throw new TypeError('data.byteLength > 512')
+    if (data.length > 512) throw new TypeError('data.length > 512')
     const pack = new Packet(544) // mix format: 3 * arg 8
-    if (data.byteLength) pack.set(data, 32)
+    if (data.length) pack.set(data, 32)
     pack.setBigUint64(0, BigInt(cmd))
     for (let i = 0; i < 3; i++) pack.setBigUint64(8 + (i << 3), BigInt(arg[i] ?? 0))
     await this.writePacket(pack)
@@ -487,7 +487,7 @@ export default class Proxmark3 {
               utils.logTime(resp.data.subarray(2).utf8)
               continue
             }
-            if (resp.cmd === PM3_CMD.WTX && resp.data.byteLength === 2) {
+            if (resp.cmd === PM3_CMD.WTX && resp.data.length === 2) {
               const wtx = resp.data.getUint16(0)
               if (wtx < 0xFFFF) {
                 utils.logTime(`extend timeout: ${ctx.timeout} + ${wtx} = ${ctx.timeout + wtx} ms`)

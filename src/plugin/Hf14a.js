@@ -212,9 +212,9 @@ export default class Pm3Hf14a {
 
       if (uid) {
         if (!Packet.isLen(uid)) throw new TypeError('invalid uid')
-        if (!_.includes([4, 7, 10], uid.byteLength)) throw new TypeError('invalid uid')
+        if (!_.includes([4, 7, 10], uid.length)) throw new TypeError('invalid uid')
         data.set(uid, 3)
-        flags |= (1 << _.floor(uid.byteLength / 3)) // FLAG_4B_UID_IN_DATA, FLAG_7B_UID_IN_DATA, FLAG_10B_UID_IN_DATA
+        flags |= (1 << _.floor(uid.length / 3)) // FLAG_4B_UID_IN_DATA, FLAG_7B_UID_IN_DATA, FLAG_10B_UID_IN_DATA
       } else flags |= 0x10 // FLAG_UID_IN_EMUL
 
       if (atqa) {
@@ -332,10 +332,10 @@ export default class Pm3Hf14a {
       topaz = false, // use Topaz protocol to send command
     } = {}) => {
       if (!Packet.isLen(data)) throw new TypeError('invalid data type')
-      if (data.byteLength >= 512) throw new TypeError('invalid data length')
+      if (data.length >= 512) throw new TypeError('invalid data length')
       if (crc) { // crc
-        if (data.byteLength >= 510) throw new TypeError('failed to add CRC') // PM3_CMD_DATA_SIZE 512 - 2 = 510
-        if (data.byteLength > 0) data = Packet.merge(data, topaz ? crc16X25(data) : crc16A(data))
+        if (data.length >= 510) throw new TypeError('failed to add CRC') // PM3_CMD_DATA_SIZE 512 - 2 = 510
+        if (data.length > 0) data = Packet.merge(data, topaz ? crc16X25(data) : crc16A(data))
       }
 
       let flags = [0, 0x1, 0x81]?.[active] // ISO14A_CONNECT = 0x1, ISO14A_NO_SELECT = 0x80
@@ -344,20 +344,20 @@ export default class Pm3Hf14a {
         timeout = _.floor(1356 / (8 * 16) * Math.min(timeout, 40542464)) // timeout in ETUs (time to transfer 1 bit, approx. 9.4 us)
       }
       if (!disconnect) flags |= 0x2 // ISO14A_NO_DISCONNECT
-      if (data.byteLength) flags |= 0x8 // ISO14A_RAW
+      if (data.length) flags |= 0x8 // ISO14A_RAW
       if (topaz) flags |= 0x100 // ISO14A_TOPAZMODE
       if (!rats) flags |= 0x200 // ISO14A_NO_RATS
       if (ecp) flags |= 0x800 // ISO14A_USE_ECP
       if (magsafe) flags |= 0x1000 // ISO14A_USE_MAGSAFE
       pm3.clearRespBuf()
-      await pm3.sendCommandOLD({ cmd: PM3_CMD.HF_ISO14443A_READER, arg: [flags, data.byteLength | (numbits << 16), timeout], data })
+      await pm3.sendCommandOLD({ cmd: PM3_CMD.HF_ISO14443A_READER, arg: [flags, data.length | (numbits << 16), timeout], data })
       if (!reply) return
       if (active === 1) { // 1: active with select
         const selRes = await pm3.readRespTimeout(PM3_CMD.ACK, timeout + 2500)
         selRes.uidlen = Number(selRes.getArg(1)) & 0xFFFF
         if (!selRes.uidlen) throw new Error('Failed to select card')
       }
-      if (!data.byteLength) return
+      if (!data.length) return
       const resp = await pm3.readRespTimeout(PM3_CMD.ACK, timeout + 2500)
       resp.datalen = Number(resp.getArg(0)) & 0xFFFF
       if (!resp.datalen) throw new Error('Failed to receive data')
@@ -383,7 +383,7 @@ export default class Pm3Hf14a {
               .values()))
           }
           if (!Packet.isLen(keys)) throw new TypeError('invalid keys type')
-          const keyslen = keys.byteLength
+          const keyslen = keys.length
           if (keyslen < 6 || keyslen % 6) throw new TypeError('invalid keys length')
           for (const strategy of [1, 2]) {
             for (let i = 0; i < keyslen; i += 510) { // 512 - 512 % 6 = 510
@@ -394,7 +394,7 @@ export default class Pm3Hf14a {
                   // (isLast << 12) | (isFirst << 8) | maxSector
                   ((i + 510 >= keyslen) << 12) | ((i === 0) << 8) | maxSector,
                   strategy, // strategys: 1= deep first on sector 0 AB,  2= width first on all sectors
-                  data.byteLength / 6, // size
+                  data.length / 6, // size
                 ],
               }
             }

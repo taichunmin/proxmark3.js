@@ -35,12 +35,12 @@ export default class Pm3Waveshare {
       // ISO14A_NO_SELECT = 0x80
       // ISO14A_NO_RATS = 0x200
       // timeout 1s = 1356 / (8 * 16) * Math.min(timeout, 40542464) = 678000
-      await pm3.sendCommandMix({ cmd: CMD.HF_ISO14443A_READER, arg: [0x2AB, pack.byteLength], data: pack })
+      await pm3.sendCommandMix({ cmd: CMD.HF_ISO14443A_READER, arg: [0x2AB, pack.length], data: pack })
       const resp = await pm3.waitRespTimeout(CMD.ACK, 3500)
       const rx = resp.data.subarray(0, Number(resp.getArg(0)))
       logTime('sendCmd resp =', rx.hex)
       if (_.isInteger(ack)) {
-        if (rx.byteLength < 2) throw new Error('invalid response length')
+        if (rx.length < 2) throw new Error('invalid response length')
         if (rx.getUint16(0, false) !== ack) throw new Error('invalid response ack')
       }
     }
