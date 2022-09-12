@@ -36,9 +36,8 @@ export default class Pm3Waveshare {
       // ISO14A_NO_RATS = 0x200
       // timeout 1s = 1356 / (8 * 16) * Math.min(timeout, 40542464) = 678000
       await pm3.sendCommandMix({ cmd: CMD.HF_ISO14443A_READER, arg: [0x2AB, pack.length], data: pack })
-      const resp = await pm3.waitRespTimeout(CMD.ACK, 3500)
+      const resp = await pm3.waitRespTimeout(CMD.ACK)
       const rx = resp.data.subarray(0, Number(resp.getArg(0)))
-      logTime('sendCmd resp =', rx.hex)
       if (_.isInteger(ack)) {
         if (rx.length < 2) throw new Error('invalid response length')
         if (rx.getUint16(0, false) !== ack) throw new Error('invalid response ack')
@@ -75,7 +74,7 @@ export default class Pm3Waveshare {
           // select NFCTag, anti-collision and keep field on
           await retry(async () => {
             try {
-              const { card: selCard } = await pm3.hf14aSelectCard()
+              const { card: selCard } = await pm3.$hf14a.selectCard()
               if (!_.includes(UIDS, selCard?.uid?.utf8)) throw new Error('invalid waveshare NFCTag')
             } catch (err) {
               await sleep(100)
@@ -132,7 +131,7 @@ export default class Pm3Waveshare {
           await sendCmdWithRetry({ cmd: 0x04, ack: 0x0000 })
         } finally {
           // turn field off
-          await pm3.hfDropField()
+          await pm3.$hf14a.dropField()
         }
       },
 
@@ -147,7 +146,7 @@ export default class Pm3Waveshare {
           // select NFCTag, anti-collision and keep field on
           await retry(async () => {
             try {
-              const { card: selCard } = await pm3.hf14aSelectCard()
+              const { card: selCard } = await pm3.$hf14a.selectCard()
               if (!_.includes(UIDS, selCard?.uid?.utf8)) throw new Error('invalid waveshare NFCTag')
             } catch (err) {
               await sleep(100)
@@ -207,7 +206,7 @@ export default class Pm3Waveshare {
           await sendCmdWithRetry({ cmd: 0x04, ack: 0x0000 })
         } finally {
           // turn field off
-          await pm3.hfDropField()
+          await pm3.$hf14a.dropField()
         }
       },
     }
