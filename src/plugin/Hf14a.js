@@ -9,18 +9,17 @@ export default class Pm3Hf14a {
   install (context, pluginOption) {
     const { Packet, pm3, PM3_CMD, utils: { retry } } = context
 
-    const mfTypeToMaxSector = (() => {
-      const MF_MAX_SECTOR = { mini: 5, '1k': 16, '2k': 32, '4k': 40 }
-      return type => {
-        type = _.toLower(type)
-        if (!MF_MAX_SECTOR[type]) throw new TypeError('invalid mifare type')
-        return MF_MAX_SECTOR[type]
-      }
-    })()
-
     const mfIsValidAcl = acl => {
       const u4arr = _.flatten(_.times(3, i => [(acl[i] & 0xF0) >> 4, acl[i] & 0xF]))
       return _.every([[1, 2], [0, 5], [3, 4]], ([a, b]) => u4arr[a] ^ u4arr[b] === 0xF)
+    }
+
+    const mfKeysUniq = keys => {
+      if (!_.isArray(keys)) throw new TypeError('invalid keys')
+      return _.chain(keys)
+        .filter(key => Packet.isLen(key, 6))
+        .uniqWith((val1, val2) => val1.isEqual(val2))
+        .value()
     }
 
     const dropField = async () => {
@@ -62,137 +61,308 @@ export default class Pm3Hf14a {
       }
     }
 
-    // https://github.com/RfidResearchGroup/proxmark3/blob/master/client/src/mifare/mifarehost.c#L807
-    const mfReadBlock = async (blockNo, keyType, key) => {
+    // https://github.com/RfidResearchGroup/proxmark3/blob/master/client/src/mifare/mifarehost.c#L180
+    const mfAuthBlock = async ({ block = 0, isKb = 0, key } = {}) => {
       if (!Packet.isLen(key, 6)) throw new TypeError('invalid key')
-      const data = new Packet(8)
-      data.setUint8(0, blockNo)
-      data.setUint8(1, keyType)
-      data.set(key, 2)
+      isKb = isKb ? 1 : 0
       pm3.clearRespBuf()
-      await pm3.sendCommandNG({ cmd: PM3_CMD.HF_MIFARE_READBL, data })
-      const resp = await pm3.readRespTimeout(PM3_CMD.HF_MIFARE_READBL)
-      if (resp.status) throw new Error('Failed to read block')
-      return resp.data
+      await pm3.sendCommandNG({ cmd: PM3_CMD.HF_MIFARE_CHKKEYS, data: new Packet([isKb, block, 1, 0, 1]) })
+      const resp = await pm3.readRespTimeout(PM3_CMD.HF_MIFARE_CHKKEYS)
+      if (resp.status && !resp.data[6]) throw new Error(`Failed to auth block ${block}`)
+      return resp.data.subarray(0, 6)
+    }
+
+    // https://github.com/RfidResearchGroup/proxmark3/blob/master/client/src/mifare/mifarehost.c#L807
+    const mfReadBlock = async ({ block = 0, isKb = 0, key } = {}) => {
+      if (!Packet.isLen(key, 6)) throw new TypeError('invalid key')
+      isKb = isKb ? 1 : 0
+      return await retry(async () => {
+        pm3.clearRespBuf()
+        await pm3.sendCommandNG({ cmd: PM3_CMD.HF_MIFARE_READBL, data: new Packet([block, isKb, ...key]) })
+        const resp = await pm3.readRespTimeout(PM3_CMD.HF_MIFARE_READBL)
+        if (resp.status) throw new Error(`Failed to read block ${block}`)
+        return resp.data
+      })
+    }
+
+    const mfReadBlockKeyBA = async ({ block = 0, ka, kb } = {}) => {
+      for (let isKb = 1; isKb >= 0; isKb--) {
+        try {
+          return await mfReadBlock({ block, isKb, key: [ka, kb][isKb] })
+        } catch (err) {}
+      }
+      throw new Error(`Failed to read block ${block}`)
     }
 
     // https://github.com/RfidResearchGroup/proxmark3/blob/master/client/src/mifare/mifarehost.c#L786
-    const mfReadSector = async (sectorNo, keyType, key) => {
+    const mfReadSector = async ({ sector = 0, isKb = 0, key } = {}) => {
       if (!Packet.isLen(key, 6)) throw new TypeError('invalid key')
-      pm3.clearRespBuf()
-      await pm3.sendCommandMix({ cmd: PM3_CMD.HF_MIFARE_READSC, arg: [sectorNo, keyType], data: key })
-      const resp = await pm3.readRespTimeout(PM3_CMD.ACK)
-      const status = Number(resp.getArg(0)) & 0xFF
-      if (!status) throw new Error(`Failed to read block, sectorNo = ${sectorNo}`)
-      return resp.data.slice(0, 64)
+      isKb = isKb ? 1 : 0
+      return await retry(async () => {
+        pm3.clearRespBuf()
+        await pm3.sendCommandMix({ cmd: PM3_CMD.HF_MIFARE_READSC, arg: [sector, isKb], data: key })
+        const resp = await pm3.readRespTimeout(PM3_CMD.ACK)
+        const status = Number(resp.getArg(0)) & 0xFF
+        if (!status) throw new Error(`Failed to read sector ${sector}`)
+        return resp.data.slice(0, 64)
+      })
     }
 
-    const mfReadSectorKeyBA = async ({ sectorNo, ka, kb }) => { // 使用 BA key 嘗試讀取 sector
-      const fn1 = async () => {
+    const mfReadSectorKeyBA = async ({ sector = 0, ka, kb } = {}) => { // 使用 BA key 嘗試讀取 sector
+      const data = new Packet(64)
+      const success = { key: [0, 0], read: [0, 0, 0, 0] }
+      for (let isKb = 1; isKb >= 0; isKb--) {
         try {
-          return await mfReadSector(sectorNo, 1, kb)
+          const key = [ka, kb][isKb]
+          await mfAuthBlock({ block: sector * 4, isKb, key })
+          success.key[isKb] = 1
+          for (let i = 0; i < 4; i++) {
+            try {
+              if (success.read[i]) continue
+              const blockData = await mfReadBlock({ block: sector * 4 + i, isKb, key })
+              data.set(blockData, i * 16)
+              success.read[i] = 1
+            } catch (err) {}
+          }
         } catch (err) {}
-        return await mfReadSector(sectorNo, 0, ka)
       }
-      try {
-        const sector = await retry(fn1)
-        if (ka) sector.set(ka, 48)
-        if (kb) sector.set(kb, 58)
-        return sector
-      } catch (err) {
-        throw _.set(new Error(`Failed to read sector ${sectorNo}`), 'data.sectorNo', sectorNo)
+      for (let isKb = 1; isKb >= 0; isKb--) {
+        if (!success.key[isKb]) continue
+        data.set([ka, kb][isKb], [48, 58][isKb])
       }
+      return { data, success: success.read }
     }
 
-    const mfReadCardByKeys = async ({ type = '1k', keys }) => {
-      if (!keys) throw new TypeError('invalid keys')
-      const secKeys = await mfCheckKeys({ type, keys })
-      const maxSector = mfTypeToMaxSector(type)
-      const card = new Packet(maxSector * 64)
-      const errors = []
-      for (let i = 0; i < maxSector; i++) {
-        try {
-          card.set(await mfReadSectorKeyBA({
-            sectorNo: i,
-            ka: secKeys[i * 2],
-            kb: secKeys[i * 2 + 1],
-          }), i * 64)
-        } catch (err) {
-          errors.push(err)
-        }
+    const mfReadCardByKeys = async ({ keys, sectorMax = 16 } = {}) => {
+      keys = mfKeysUniq(keys)
+      if (!keys.length) throw new TypeError('invalid keys')
+      const success = []
+      const secKeys = await mfKeysCheck({ keys, sectorMax })
+      const data = new Packet(sectorMax * 64)
+      for (let i = 0; i < sectorMax; i++) {
+        const sectorRes = await mfReadSectorKeyBA({
+          sector: i,
+          ka: secKeys[i * 2],
+          kb: secKeys[i * 2 + 1],
+        })
+        data.set(sectorRes.data, i * 64)
+        success.push(...sectorRes.success)
       }
-      return { errors, card }
+      return { data, success }
     }
 
     // https://github.com/RfidResearchGroup/proxmark3/blob/master/client/src/cmdhfmf.c#L438
-    const mfWriteBlock = async (blockNo, keyType, key, block) => {
+    const mfWriteBlock = async ({ block = 0, isKb = 0, key, data } = {}) => {
       if (!Packet.isLen(key, 6)) throw new TypeError('invalid key')
-      if (!Packet.isLen(block, 16)) throw new TypeError('invalid block')
-      const data = new Packet(26)
-      data.set(key, 0)
-      data.set(block, 10)
-      pm3.clearRespBuf()
-      await pm3.sendCommandMix({ cmd: PM3_CMD.HF_MIFARE_WRITEBL, arg: [blockNo, keyType], data })
-      const resp = await pm3.readRespTimeout(PM3_CMD.ACK)
-      const status = Number(resp.getArg(0)) & 0xFF
-      if (!status) throw new Error(`Failed to write block, blockNo = ${blockNo}`)
+      if (!Packet.isLen(data, 16)) throw new TypeError('invalid data')
+      isKb = isKb ? 1 : 0
+      await retry(async () => {
+        pm3.clearRespBuf()
+        await pm3.sendCommandMix({ cmd: PM3_CMD.HF_MIFARE_WRITEBL, arg: [block, isKb], data: new Packet([...key, 0, 0, 0, 0, ...data]) })
+        const resp = await pm3.readRespTimeout(PM3_CMD.ACK)
+        const status = Number(resp.getArg(0)) & 0xFF
+        if (!status) throw new Error(`Failed to write block ${block}`)
+      })
     }
 
-    const mfWriteSectorKeyBA = async ({ sectorNo, sector, ka, kb }) => {
-      if (!Packet.isLen(sector, 64)) throw new TypeError('invalid sector')
-      if (!mfIsValidAcl(sector.subarray(54, 57))) throw new TypeError('invalid sector acl')
-      const errors = []
-      const fn1 = async (blockNo, block) => {
+    const mfWriteBlockKeyBA = async ({ block = 0, ka, kb, data } = {}) => {
+      for (let isKb = 1; isKb >= 0; isKb--) {
         try {
-          return await mfWriteBlock(blockNo, 1, kb, block)
+          await mfWriteBlock({ block, isKb, key: [ka, kb][isKb], data })
         } catch (err) {}
-        await mfWriteBlock(blockNo, 0, ka, block)
       }
+      throw new Error(`Failed to write block ${block}`)
+    }
+
+    const mfWriteSector = async ({ sector = 0, isKb, key, data } = {}) => {
+      if (!Packet.isLen(data, 64)) throw new TypeError('invalid data')
+      if (!mfIsValidAcl(data.subarray(54, 57))) throw new TypeError('invalid sector acl')
+      const success = [0, 0, 0, 0]
       for (let i = 0; i < 4; i++) {
-        const blockNo = (sectorNo * 4) + i
-        const block = sector.subarray(i * 16, (i + 1) * 16)
         try {
-          await retry(() => fn1(blockNo, block))
-        } catch (err) {
-          _.set(err, 'data.blockNo', blockNo)
-          errors.push(err)
+          await mfWriteBlock({ block: sector * 4 + i, isKb, key, data: data.subarray(i * 16, i * 16 + 16) })
+          success[i] = 1
+        } catch (err) {}
+      }
+      return success
+    }
+
+    const mfWriteSectorKeyBA = async ({ sector = 0, ka, kb, data } = {}) => {
+      if (!Packet.isLen(data, 64)) throw new TypeError('invalid data')
+      if (!mfIsValidAcl(data.subarray(54, 57))) throw new TypeError('invalid sector acl')
+      const success = [0, 0, 0, 0]
+      for (let isKb = 1; isKb >= 0; isKb--) {
+        const key = [ka, kb][isKb]
+        for (let i = 0; i < 4; i++) {
+          if (success[i]) continue
+          try {
+            await mfWriteBlock({ block: sector * 4 + i, isKb, key, data: data.subarray(i * 16, i * 16 + 16) })
+            success[i] = 1
+          } catch (err) {}
         }
       }
-      return { errors }
+      return success
     }
 
-    const mfWriteCardByKeys = async ({ type = '1k', keys, card }) => {
-      if (!keys) throw new TypeError('invalid keys')
-      const maxSector = mfTypeToMaxSector(type)
-      if (!Packet.isLen(card, maxSector * 64)) throw new TypeError('invalid card')
-      const secKeys = await mfCheckKeys({ type, keys })
-      const errors = []
-      for (let i = 0; i < maxSector; i++) {
-        const { errors: errors1 } = await mfWriteSectorKeyBA({
-          ka: secKeys[i * 2],
-          kb: secKeys[i * 2 + 1],
-          sector: card.subarray(i * 64, (i + 1) * 64),
-          sectorNo: i,
-        })
-        if (errors1.length) errors.push(...errors1)
+    const mfWriteCardByKeys = async ({ sectorMax = 16, keys, data } = {}) => {
+      if (!Packet.isLen(data, sectorMax * 64)) throw new TypeError('invalid data')
+      keys = mfKeysUniq(keys)
+      if (!keys.length) throw new TypeError('invalid keys')
+      const secKeys = await mfKeysCheck({ sectorMax, keys })
+      const success = []
+      for (let i = 0; i < sectorMax; i++) {
+        let secSuccess = [0, 0, 0, 0]
+        try {
+          secSuccess = await mfWriteSectorKeyBA({
+            data: data.subarray(i * 64, (i + 1) * 64),
+            ka: secKeys[i * 2],
+            kb: secKeys[i * 2 + 1],
+            sector: i,
+          })
+        } catch (err) {}
+        success.push(...secSuccess)
       }
-      return { errors }
+      return success
     }
 
-    // https://github.com/RfidResearchGroup/proxmark3/blob/master/client/src/mifare/mifarehost.c#L866
-    const mfWriteBlockEml = async (data, blockNo, blockCnt = 1, blockSize = 16) => {
-      if (!Packet.isLen(data, blockCnt * blockSize)) throw new TypeError('invalid data')
-      pm3.clearRespBuf()
-      await pm3.sendCommandNG({ cmd: PM3_CMD.HF_MIFARE_EML_MEMSET, data: new Packet([blockNo, blockCnt, blockSize, ...data]) })
+    // https://github.com/RfidResearchGroup/proxmark3/blob/master/client/src/cmdhfmf.c#L4662
+    const mfReadBlockGen1 = async ({ block = 0 } = {}) => {
+      // MAGIC_SINGLE = (MAGIC_WUPC | MAGIC_HALT | MAGIC_INIT | MAGIC_OFF) // 0x1E
+      const flags = 0x1E
+      return await retry(async () => {
+        pm3.clearRespBuf()
+        await pm3.sendCommandMix({ cmd: PM3_CMD.HF_MIFARE_CGETBL, arg: [flags, block] })
+        const resp = await pm3.readRespTimeout(PM3_CMD.ACK)
+        const status = Number(resp.getArg(0)) & 0xFF
+        if (!status) throw new Error(`Failed to write block ${block}`)
+        return resp.data.slice(0, 16)
+      })
+    }
+
+    const mfReadSectorGen1 = async ({ sector = 0 } = {}) => {
+      const data = new Packet(64)
+      const success = [0, 0, 0, 0]
+      for (let i = 0; i < 4; i++) {
+        try {
+          data.set(await mfReadBlockGen1({ block: i }), i * 16)
+          success[i] = 1
+        } catch (err) {}
+      }
+      return { data, success }
+    }
+
+    const mfReadCardGen1 = async ({ sectorMax = 16 } = {}) => {
+      const data = new Packet(sectorMax * 64)
+      const success = _.times(sectorMax * 64, () => 0)
+      for (let i = 0; i < sectorMax * 4; i++) {
+        try {
+          data.set(await mfReadBlockGen1({ block: i }), i * 16)
+          success[i] = 1
+        } catch (err) {}
+      }
+      return { data, success }
+    }
+
+    // https://github.com/RfidResearchGroup/proxmark3/blob/master/client/src/cmdhfmf.c#L4472
+    const mfWriteBlockGen1 = async ({ block, data, wipe = false } = {}) => {
+      if (!Packet.isLen(data, 16)) throw new TypeError('invalid data')
+      // MAGIC_SINGLE = (MAGIC_WUPC | MAGIC_HALT | MAGIC_INIT | MAGIC_OFF) // 0x1E
+      // MAGIC_WIPE = 0x40
+      const flags = 0x1E | (wipe ? 0x40 : 0)
+      await retry(async () => {
+        pm3.clearRespBuf()
+        await pm3.sendCommandMix({ cmd: PM3_CMD.HF_MIFARE_CSETBL, arg: [flags, block], data })
+        const resp = await pm3.readRespTimeout(PM3_CMD.ACK)
+        const status = Number(resp.getArg(0)) & 0xFF
+        if (!status) throw new Error(`Failed to write block ${block}`)
+        return resp.data.slice(0, 4)
+      })
+    }
+
+    const mfWriteSectorGen1 = async ({ sector = 16, data } = {}) => {
+      if (!Packet.isLen(data, 64)) throw new TypeError('invalid data')
+      const blocks = data.chunk(16)
+      const success = [0, 0, 0, 0]
+      for (let i = 0; i < blocks.length; i++) {
+        try {
+          await mfWriteBlockGen1({ block: sector * 4 + i, data: blocks[i] })
+          success[i] = 1
+        } catch (err) {}
+      }
+      return success
+    }
+
+    const mfWriteCardGen1 = async ({ sectorMax = 16, data } = {}) => {
+      if (!Packet.isLen(data, sectorMax * 64)) throw new TypeError('invalid data')
+      const blocks = data.chunk(16)
+      const success = _.times(sectorMax * 4, () => 0)
+      for (let i = 0; i < blocks.length; i++) {
+        try {
+          await mfWriteBlockGen1({ block: i, data: blocks[i] })
+          success[i] = 1
+        } catch (err) {}
+      }
+      return success
     }
 
     // https://github.com/RfidResearchGroup/proxmark3/blob/master/client/src/mifare/mifarehost.c#L832
-    const mfReadBlockEml = async blockNo => {
-      pm3.clearRespBuf()
-      await pm3.sendCommandNG({ cmd: PM3_CMD.HF_MIFARE_EML_MEMGET, data: new Packet([blockNo, 1]) })
-      const resp = await pm3.readRespTimeout(PM3_CMD.HF_MIFARE_EML_MEMGET)
-      if (resp.status) throw new Error('Failed to read block from eml')
-      return resp.data
+    const mfEmlReadBlock = async ({ block = 0 } = {}) => {
+      return await retry(async () => {
+        pm3.clearRespBuf()
+        await pm3.sendCommandNG({ cmd: PM3_CMD.HF_MIFARE_EML_MEMGET, data: new Packet([block, 1]) })
+        const resp = await pm3.readRespTimeout(PM3_CMD.HF_MIFARE_EML_MEMGET)
+        if (resp.status) throw new Error('Failed to read block from eml')
+        return resp.data
+      })
+    }
+
+    const mfEmlReadSector = async ({ sector = 0 } = {}) => {
+      const data = new Packet(64)
+      for (let i = 0; i < 4; i++) {
+        try {
+          const blockData = await mfEmlReadBlock({ block: sector * 4 + i })
+          data.set(blockData, i * 16)
+        } catch (err) {}
+      }
+      return data
+    }
+
+    const mfEmlReadCard = async ({ sectorMax = 16 } = {}) => {
+      const data = new Packet(sectorMax * 64)
+      for (let i = 0; i < 4 * sectorMax; i++) {
+        try {
+          const blockData = await mfEmlReadBlock({ block: i })
+          data.set(blockData, i * 16)
+        } catch (err) {}
+      }
+      return data
+    }
+
+    // https://github.com/RfidResearchGroup/proxmark3/blob/master/client/src/mifare/mifarehost.c#L866
+    const mfEmlWriteBlock = async ({ block = 0, data } = {}) => {
+      if (!Packet.isLen(data, 16)) throw new TypeError('invalid data')
+      await retry(async () => {
+        pm3.clearRespBuf()
+        await pm3.sendCommandNG({ cmd: PM3_CMD.HF_MIFARE_EML_MEMSET, data: new Packet([block, 1, 16, ...data]) })
+      })
+    }
+
+    const mfEmlWriteSector = async ({ sector = 0, data } = {}) => {
+      if (!Packet.isLen(data, 64)) throw new TypeError('invalid data')
+      for (let i = 0; i < 4; i++) {
+        try {
+          await mfEmlWriteBlock({ block: sector * 4 + i, data: data.subarray(i * 16, i * 16 + 16) })
+        } catch (err) {}
+      }
+    }
+
+    const mfEmlWriteCard = async ({ sectorMax = 16, data } = {}) => {
+      if (!Packet.isLen(data, sectorMax * 64)) throw new TypeError('invalid data')
+      for (let i = 0; i < 4 * sectorMax; i++) {
+        try {
+          await mfEmlWriteBlock({ block: i, data: data.subarray(i * 16, i * 16 + 16) })
+        } catch (err) {}
+      }
     }
 
     // https://github.com/RfidResearchGroup/proxmark3/blob/master/client/src/cmdhfmf.c#L3416
@@ -206,7 +376,7 @@ export default class Pm3Hf14a {
       nrArAttack = false,
       emukeys = false,
       cve = false,
-    }) => {
+    } = {}) => {
       const data = new Packet(16)
       let flags = 0
 
@@ -256,65 +426,6 @@ export default class Pm3Hf14a {
         // TODO: readerAttack not implemented
         console.log('nrArAttack', resp)
       }
-    }
-
-    // https://github.com/RfidResearchGroup/proxmark3/blob/master/client/src/cmdhfmf.c#L4472
-    const mfWriteBlockGen1 = async (blockNo, data, wipe = false) => {
-      if (!_.inRange(blockNo, 0, 64)) throw new TypeError('invalid blockNo')
-      if (!Packet.isLen(data, 16)) throw new TypeError('invalid data')
-      // MAGIC_SINGLE = (MAGIC_WUPC | MAGIC_HALT | MAGIC_INIT | MAGIC_OFF) // 0x1E
-      // MAGIC_WIPE = 0x40
-      const flags = 0x1E | (wipe ? 0x40 : 0)
-      pm3.clearRespBuf()
-      await pm3.sendCommandMix({ cmd: PM3_CMD.HF_MIFARE_CSETBL, arg: [flags, blockNo], data })
-      const resp = await pm3.readRespTimeout(PM3_CMD.ACK, 35e2)
-      const status = Number(resp.getArg(0)) & 0xFF
-      if (!status) throw new Error(`Failed to write block, blockNo = ${blockNo}`)
-      return resp.data.slice(0, 4)
-    }
-
-    const mfWriteCardGen1 = async ({ type = '1k', card }) => {
-      const maxSector = mfTypeToMaxSector(type)
-      if (!Packet.isLen(card, maxSector * 64)) throw new TypeError('invalid card')
-      const blocks = card.chunk(16)
-      const errors = []
-      for (let i = 0; i < blocks.length; i++) {
-        try {
-          await retry(() => mfWriteBlockGen1(i, blocks[i]))
-        } catch (err) {
-          _.set(err, 'data.blockNo', i)
-          errors.push(err)
-        }
-      }
-      return { errors }
-    }
-
-    // https://github.com/RfidResearchGroup/proxmark3/blob/master/client/src/cmdhfmf.c#L4662
-    const mfReadBlockGen1 = async blockNo => {
-      if (!_.inRange(blockNo, 0, 64)) throw new TypeError('invalid blockNo')
-      // MAGIC_SINGLE = (MAGIC_WUPC | MAGIC_HALT | MAGIC_INIT | MAGIC_OFF) // 0x1E
-      const flags = 0x1E
-      pm3.clearRespBuf()
-      await pm3.sendCommandMix({ cmd: PM3_CMD.HF_MIFARE_CGETBL, arg: [flags, blockNo] })
-      const resp = await pm3.readRespTimeout(PM3_CMD.ACK)
-      const status = Number(resp.getArg(0)) & 0xFF
-      if (!status) throw new Error(`Failed to write block, blockNo = ${blockNo}`)
-      return resp.data.slice(0, 16)
-    }
-
-    const mfReadCardGen1 = async ({ type = '1k' }) => {
-      const maxBlock = mfTypeToMaxSector(type) * 4
-      const card = new Packet(maxBlock * 16)
-      const errors = []
-      for (let i = 0; i < maxBlock; i++) {
-        try {
-          card.set(await retry(() => mfReadBlockGen1(i)), i * 16)
-        } catch (err) {
-          _.set(err, 'data.blockNo', i)
-          errors.push(err)
-        }
-      }
-      return { errors, card }
     }
 
     // https://github.com/RfidResearchGroup/proxmark3/blob/master/client/src/cmdhf14a.c#L1222
@@ -368,31 +479,24 @@ export default class Pm3Hf14a {
       return resp
     }
 
-    const mfCheckKeys = async ({ type = '1k', keys = null }) => {
-      const maxSector = mfTypeToMaxSector(type)
+    const mfKeysCheck = async ({ keys, sectorMax = 16 } = {}) => {
       const argIterator = {
         * [Symbol.iterator] () {
           if (!keys) {
-            yield { arg: [0x1100 | maxSector, 0x101, 0] }
+            yield { arg: [0x1100 | sectorMax, 0x101, 0] }
             return
           }
-          if (_.isArray(keys)) {
-            keys = Packet.merge(...(_.chain(keys)
-              .filter(key => Packet.isLen(key, 6))
-              .uniqBy('hex')
-              .values()))
-          }
-          if (!Packet.isLen(keys)) throw new TypeError('invalid keys type')
-          const keyslen = keys.length
-          if (keyslen < 6 || keyslen % 6) throw new TypeError('invalid keys length')
+          keys = mfKeysUniq(keys)
+          if (!keys.length) throw new TypeError('invalid keys')
+          const keyChunks = Packet.merge(...keys).chunk(510)
           for (const strategy of [1, 2]) {
-            for (let i = 0; i < keyslen; i += 510) { // 512 - 512 % 6 = 510
-              const data = keys.subarray(i, i + 510)
+            for (let i = 0; i < keyChunks.length; i++) { // 512 - 512 % 6 = 510
+              const data = keyChunks[i]
               yield {
                 data,
                 arg: [
-                  // (isLast << 12) | (isFirst << 8) | maxSector
-                  ((i + 510 >= keyslen) << 12) | ((i === 0) << 8) | maxSector,
+                  // (isLast << 12) | (isFirst << 8) | sectorMax
+                  ((i + 1 === keyChunks.length) << 12) | ((i === 0) << 8) | sectorMax,
                   strategy, // strategys: 1= deep first on sector 0 AB,  2= width first on all sectors
                   data.length / 6, // size
                 ],
@@ -407,13 +511,13 @@ export default class Pm3Hf14a {
         pm3.clearRespBuf()
         await pm3.sendCommandOLD({ cmd: PM3_CMD.HF_MIFARE_CHKKEYS_FAST, ...arg })
         resp = await pm3.readRespTimeout(PM3_CMD.ACK, 36e4) // 360s
-        if (Number(resp.getArg(0)) === maxSector * 2) break // all key found
+        if (Number(resp.getArg(0)) === sectorMax * 2) break // all key found
       }
       const found = {
         flags: new Packet(_.map([7, 6, 5, 4, 3, 2, 1, 0, 8, 9], idx => resp.data[480 + idx])),
         keys: [],
       }
-      for (let i = 0; i < maxSector; i++) {
+      for (let i = 0; i < sectorMax; i++) {
         for (const j of [2 * i, 2 * i + 1]) {
           const isFound = (found.flags[j >> 3] >> (j & 7)) & 1
           found.keys[j] = isFound ? resp.data.subarray(j * 6, j * 6 + 6) : null
@@ -426,20 +530,31 @@ export default class Pm3Hf14a {
       cardInfo,
       deselectCard,
       dropField,
-      mfCheckKeys,
+      mfAuthBlock,
+      mfEmlReadBlock,
+      mfEmlReadCard,
+      mfEmlReadSector,
+      mfEmlWriteBlock,
+      mfEmlWriteCard,
+      mfEmlWriteSector,
+      mfKeysCheck,
+      mfKeysUniq,
       mfReadBlock,
-      mfReadBlockEml,
       mfReadBlockGen1,
+      mfReadBlockKeyBA,
       mfReadCardByKeys,
       mfReadCardGen1,
       mfReadSector,
+      mfReadSectorGen1,
       mfReadSectorKeyBA,
       mfSimulateCard,
       mfWriteBlock,
-      mfWriteBlockEml,
       mfWriteBlockGen1,
+      mfWriteBlockKeyBA,
       mfWriteCardByKeys,
       mfWriteCardGen1,
+      mfWriteSector,
+      mfWriteSectorGen1,
       mfWriteSectorKeyBA,
       selectCard,
       sendRaw,

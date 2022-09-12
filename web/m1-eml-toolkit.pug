@@ -52,11 +52,11 @@ block content
 
 block script
   script.
-    const { Packet, Proxmark3, utils } = window.Proxmark3
+    const { Packet, Proxmark3 } = window.Proxmark3
     const pm3 = new Proxmark3()
     pm3.use(new window.Pm3WebserialAdapter())
     pm3.use(new window.Pm3Hf14a())
-    pm3.use(new window.Pm3LoggerRxTx())
+    //- pm3.use(new window.Pm3LoggerRxTx())
     window.vm = new Vue({
       el: '#app',
       data: {
@@ -92,20 +92,18 @@ block script
             keys.push(this.card.subarray(i * 64 + 48, i * 64 + 54))
             keys.push(this.card.subarray(i * 64 + 58, i * 64 + 64))
           }
-          return this.uniqKeys(keys)
+          return pm3.$hf14a.mfKeysUniq(keys)
         },
         keys () {
           const keys = Packet.fromHex(this.h.keys)
-          return keys.length % 6 ? null : keys.chunk(6)
+          return keys.length % 6 ? null : pm3.$hf14a.mfKeysUniq(keys.chunk(6))
         },
       },
       methods: {
         async btnReadFlash () {
           try {
             this.showLoading('請稍候', '正在從 PM3 讀取')
-            const card = new Packet(1024)
-            for (let i = 0; i < 64; i++) card.set(await utils.retry(() => pm3.$hf14a.mfReadBlockEml(i)), i * 16)
-            this.setCard(card)
+            this.setCard(await pm3.$hf14a.mfEmlReadCard())
             await Swal.fire({ icon: 'success', title: '讀取成功' })
           } catch (err) {
             console.error(err)
@@ -115,8 +113,7 @@ block script
         async btnVerifyFlash () {
           try {
             this.showLoading('請稍候', '正在從 PM3 讀取')
-            const other = new Packet(1024)
-            for (let i = 0; i < 64; i++) other.set(await utils.retry(() => pm3.mfReadBlockEml(i)), i * 16)
+            const other = await pm3.$hf14a.mfEmlReadCard()
             console.log({ card: this.card, other })
             if (!other.isEqual(this.card)) throw new Error('卡片資料不同')
             await Swal.fire({ icon: 'success', title: '卡片資料相同' })
@@ -127,14 +124,11 @@ block script
         },
         async btnWriteFlash () {
           try {
+            if (!Packet.isLen(this.card, 1024)) throw new TypeError('EML 資料有誤')
             if (!await this.confirm('即將覆蓋 PM3 記憶體資料，是否繼續？', '繼續', '取消')) return
             this.showLoading('請稍候', '正在寫入 PM3 並模擬卡片')
-            if (!this.card) throw new TypeError('EML 資料有誤')
-            const blocks = this.card.chunk(16)
-            for (let i = 0; i < 64; i++) {
-              await pm3.cmdMfEset(blocks[i], i)
-            }
-            await pm3.cmdMfSim({ type: '1k' })
+            await pm3.$hf14a.mfEmlWriteCard({ data: this.card })
+            await pm3.$hf14a.mfSimulateCard({ type: '1k' })
             await Swal.fire({ icon: 'success', title: '模擬成功' })
           } catch (err) {
             console.error(err)
@@ -144,11 +138,13 @@ block script
         async btnReadGen1 () {
           try {
             this.showLoading('請稍候', '正在讀取 UID 卡')
-            const { errors, card } = await pm3.$hf14a.mfReadCardGen1({ type: '1k' })
-            this.setCard(card)
-            if (!errors.length) return await Swal.fire({ icon: 'success', title: '讀取成功' })
-            const failedBlocks = _.filter(_.map(errors, 'data.blockNo'), _.isInteger)
-            await Swal.fire({ icon: 'error', title: `${failedBlocks.length} 個 block 讀取失敗`, text: `失敗的 block: ${failedBlocks.join()}` })
+            const { data, success } = await pm3.$hf14a.mfReadCardGen1()
+            this.setCard(data)
+            if (_.sum(success) !== 64) {
+              const failed = _.filter(_.map(success, (v, k) => [k, null][v]), _.isInteger)
+              return await Swal.fire({ icon: 'error', title: `${failed.length} 個 block 讀取失敗`, text: `失敗的 block: ${failed.join()}` })
+            }
+            await Swal.fire({ icon: 'success', title: '讀取成功' })
           } catch (err) {
             console.error(err)
             await Swal.fire({ icon: 'error', title: '讀取失敗', text: err.message })
@@ -157,10 +153,10 @@ block script
         async btnVerifyGen1 () {
           try {
             this.showLoading('請稍候', '正在讀取 UID 卡')
-            const { errors, card: other } = await pm3.$hf14a.mfReadCardGen1({ type: '1k' })
-            if (errors.length) {
-              const failedBlocks = _.filter(_.map(errors, 'data.blockNo'), _.isInteger)
-              return await Swal.fire({ icon: 'error', title: `${failedBlocks.length} 個 block 讀取失敗`, text: `失敗的 block: ${failedBlocks.join()}` })
+            const { data: other, success } = await pm3.$hf14a.mfReadCardGen1()
+            if (_.sum(success) !== 64) {
+              const failed = _.filter(_.map(success, (v, k) => [k, null][v]), _.isInteger)
+              return await Swal.fire({ icon: 'error', title: `${failed.length} 個 block 讀取失敗`, text: `失敗的 block: ${failed.join()}` })
             }
             console.log({ card: this.card, other })
             if (!other.isEqual(this.card)) throw new Error('卡片資料不同')
@@ -172,13 +168,15 @@ block script
         },
         async btnWriteGen1 () {
           try {
+            if (!Packet.isLen(this.card, 1024)) throw new TypeError('EML 資料有誤')
             if (!await this.confirm('即將覆蓋 UID 卡資料，是否繼續？', '繼續', '取消')) return
             this.showLoading('請稍候', '正在寫入 UID 卡')
-            if (!this.card) throw new TypeError('EML 資料有誤')
-            const { errors } = await pm3.$hf14a.mfWriteCardGen1({ card: this.card })
-            if (!errors.length) return await Swal.fire({ icon: 'success', title: '寫入成功' })
-            const failedBlocks = _.filter(_.map(errors, 'data.blockNo'), _.isInteger)
-            await Swal.fire({ icon: 'error', title: `${failedBlocks.length} 個 block 寫入失敗`, text: `失敗的 block: ${failedBlocks.join()}` })
+            const success = await pm3.$hf14a.mfWriteCardGen1({ data: this.card })
+            if (_.sum(success) !== 64) {
+              const failed = _.filter(_.map(success, (v, k) => [k, null][v]), _.isInteger)
+              return await Swal.fire({ icon: 'error', title: `${failed.length} 個 block 寫入失敗`, text: `失敗的 block: ${failed.join()}` })
+            }
+            await Swal.fire({ icon: 'success', title: '寫入成功' })
           } catch (err) {
             console.error(err)
             await Swal.fire({ icon: 'error', title: '寫入失敗', text: err.message })
@@ -187,11 +185,13 @@ block script
         async btnReadGen2 () {
           try {
             this.showLoading('請稍候', '正在讀取 CUID 卡')
-            const { errors, card } = await pm3.$hf14a.mfReadCardByKeys({ keys: this.keys })
-            this.setCard(card)
-            if (!errors.length) return await Swal.fire({ icon: 'success', title: '讀取成功' })
-            const failedSectors = _.filter(_.map(errors, 'data.sectorNo'), _.isInteger)
-            await Swal.fire({ icon: 'error', title: `${failedSectors.length} 個 sector 讀取失敗`, text: `失敗的 sector: ${failedSectors.join()}` })
+            const { success, data } = await pm3.$hf14a.mfReadCardByKeys({ keys: this.keys })
+            this.setCard(data)
+            if (_.sum(success) !== 64) {
+              const failed = _.filter(_.map(success, (v, k) => [k, null][v]), _.isInteger)
+              return await Swal.fire({ icon: 'error', title: `${failed.length} 個 block 讀取失敗`, text: `失敗的 block: ${failed.join()}` })
+            }
+            await Swal.fire({ icon: 'success', title: '讀取成功' })
           } catch (err) {
             console.error(err)
             await Swal.fire({ icon: 'error', title: '讀取失敗', text: err.message })
@@ -200,10 +200,10 @@ block script
         async btnVerifyGen2 () {
           try {
             this.showLoading('請稍候', '正在讀取 CUID 卡')
-            const { errors, card: other } = await pm3.$hf14a.mfReadCardByKeys({ keys: this.keys })
-            if (errors.length) {
-              const failedSectors = _.filter(_.map(errors, 'data.sectorNo'), _.isInteger)
-              return await Swal.fire({ icon: 'error', title: `${failedSectors.length} 個 sector 讀取失敗`, text: `失敗的 sector: ${failedSectors.join()}` })
+            const { success, data: other } = await pm3.$hf14a.mfReadCardByKeys({ keys: this.keys })
+            if (_.sum(success) !== 64) {
+              const failed = _.filter(_.map(success, (v, k) => [k, null][v]), _.isInteger)
+              return await Swal.fire({ icon: 'error', title: `${failed.length} 個 block 讀取失敗`, text: `失敗的 block: ${failed.join()}` })
             }
             console.log({ card: this.card, other })
             if (!other.isEqual(this.card)) throw new Error('卡片資料不同')
@@ -215,13 +215,15 @@ block script
         },
         async btnWriteGen2 () {
           try {
+            if (!this.card) throw new TypeError('EML 資料有誤')
             if (!await this.confirm('即將覆蓋 CUID 卡資料，是否繼續？', '繼續', '取消')) return
             this.showLoading('請稍候', '正在寫入 CUID 卡')
-            if (!this.card) throw new TypeError('EML 資料有誤')
-            const { errors } = await pm3.$hf14a.mfWriteCardByKeys({ keys: this.keys, card: this.card })
-            if (!errors.length) return await Swal.fire({ icon: 'success', title: '寫入成功' })
-            const failedBlocks = _.filter(_.map(errors, 'data.blockNo'), _.isInteger)
-            await Swal.fire({ icon: 'error', title: `${failedBlocks.length} 個 block 寫入失敗`, text: `失敗的 block: ${failedBlocks.join()}` })
+            const success = await pm3.$hf14a.mfWriteCardByKeys({ keys: this.keys, data: this.card })
+            if (_.sum(success) !== 64) {
+              const failed = _.filter(_.map(success, (v, k) => [k, null][v]), _.isInteger)
+              return await Swal.fire({ icon: 'error', title: `${failed.length} 個 block 寫入失敗`, text: `失敗的 block: ${failed.join()}` })
+            }
+            await Swal.fire({ icon: 'success', title: '寫入成功' })
           } catch (err) {
             console.error(err)
             await Swal.fire({ icon: 'error', title: '寫入失敗', text: err.message })
@@ -250,14 +252,8 @@ block script
           if (!Packet.isLen(card, 1024)) throw new TypeError('invalid card')
           this.$set(this.h, 'eml', _.map(card.chunk(16), 'hex').join('\n'))
         },
-        uniqKeys (keys) {
-          return _.chain(keys)
-            .filter(key => Packet.isLen(key, 6))
-            .uniqWith((val1, val2) => val1.isEqual(val2))
-            .value()
-        },
         setKeys (keys) {
-          keys = _.map(this.uniqKeys(keys), 'hex').join('\n')
+          keys = _.map(pm3.$hf14a.mfKeysUniq(keys), 'hex').join('\n')
           this.$set(this.h, 'keys', keys)
         },
         async confirm (text, btnConfirm, btnCancel) {
