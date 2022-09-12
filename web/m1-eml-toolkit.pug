@@ -200,7 +200,7 @@ block script
         async btnVerifyGen2 () {
           try {
             this.showLoading('請稍候', '正在讀取 CUID 卡')
-            const { success, data: other } = await pm3.$hf14a.mfReadCardByKeys({ keys: this.keys })
+            const { data: other, success } = await pm3.$hf14a.mfReadCardByKeys({ keys: this.keys })
             if (_.sum(success) !== 64) {
               const failed = _.filter(_.map(success, (v, k) => [k, null][v]), _.isInteger)
               return await Swal.fire({ icon: 'error', title: `${failed.length} 個 block 讀取失敗`, text: `失敗的 block: ${failed.join()}` })
