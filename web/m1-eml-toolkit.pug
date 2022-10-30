@@ -28,9 +28,9 @@ block content
     .form-group
       label.mb-1 Magic Card: UID
       .d-flex
-        button.btn.btn-success.mr-1(@click="btnReadGen1") 讀取資料
-        button.btn.btn-primary.mr-1(@click="btnVerifyGen1") 比對資料
-        button.btn.btn-danger.mr-1(@click="btnWriteGen1") 寫入資料
+        button.btn.btn-success.mr-1(@click="btnReadGen1a") 讀取資料
+        button.btn.btn-primary.mr-1(@click="btnVerifyGen1a") 比對資料
+        button.btn.btn-danger.mr-1(@click="btnWriteGen1a") 寫入資料
     .form-group
       label.mb-1 Magic Card: CUID, FUID, UFUID
       .d-flex
@@ -135,10 +135,11 @@ block script
             await Swal.fire({ icon: 'error', title: '模擬失敗', text: err.message })
           }
         },
-        async btnReadGen1 () {
+        async btnReadGen1a () {
           try {
             this.showLoading('請稍候', '正在讀取 UID 卡')
-            const { data, success } = await pm3.$hf14a.mfReadCardGen1()
+            const { data, success } = await pm3.$hf14a.mfReadCardGen1a()
+            console.log({ data, success })
             this.setCard(data)
             if (_.sum(success) !== 64) {
               const failed = _.filter(_.map(success, (v, k) => [k, null][v]), _.isInteger)
@@ -150,10 +151,10 @@ block script
             await Swal.fire({ icon: 'error', title: '讀取失敗', text: err.message })
           }
         },
-        async btnVerifyGen1 () {
+        async btnVerifyGen1a () {
           try {
             this.showLoading('請稍候', '正在讀取 UID 卡')
-            const { data: other, success } = await pm3.$hf14a.mfReadCardGen1()
+            const { data: other, success } = await pm3.$hf14a.mfReadCardGen1a()
             if (_.sum(success) !== 64) {
               const failed = _.filter(_.map(success, (v, k) => [k, null][v]), _.isInteger)
               return await Swal.fire({ icon: 'error', title: `${failed.length} 個 block 讀取失敗`, text: `失敗的 block: ${failed.join()}` })
@@ -166,12 +167,12 @@ block script
             await Swal.fire({ icon: 'error', title: '比對失敗', text: err.message })
           }
         },
-        async btnWriteGen1 () {
+        async btnWriteGen1a () {
           try {
             if (!Packet.isLen(this.card, 1024)) throw new TypeError('EML 資料有誤')
             if (!await this.confirm('即將覆蓋 UID 卡資料，是否繼續？', '繼續', '取消')) return
             this.showLoading('請稍候', '正在寫入 UID 卡')
-            const success = await pm3.$hf14a.mfWriteCardGen1({ data: this.card })
+            const success = await pm3.$hf14a.mfWriteCardGen1a({ data: this.card })
             if (_.sum(success) !== 64) {
               const failed = _.filter(_.map(success, (v, k) => [k, null][v]), _.isInteger)
               return await Swal.fire({ icon: 'error', title: `${failed.length} 個 block 寫入失敗`, text: `失敗的 block: ${failed.join()}` })

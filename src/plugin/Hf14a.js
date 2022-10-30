@@ -226,7 +226,7 @@ export default class Pm3Hf14a {
     }
 
     // https://github.com/RfidResearchGroup/proxmark3/blob/master/client/src/cmdhfmf.c#L4662
-    const mfReadBlockGen1 = async ({ block = 0 } = {}) => {
+    const mfReadBlockGen1a = async ({ block = 0 } = {}) => {
       // MAGIC_SINGLE = (MAGIC_WUPC | MAGIC_HALT | MAGIC_INIT | MAGIC_OFF) // 0x1E
       const flags = 0x1E
       return await retry(async () => {
@@ -239,24 +239,24 @@ export default class Pm3Hf14a {
       })
     }
 
-    const mfReadSectorGen1 = async ({ sector = 0 } = {}) => {
+    const mfReadSectorGen1a = async ({ sector = 0 } = {}) => {
       const data = new Packet(64)
       const success = [0, 0, 0, 0]
       for (let i = 0; i < 4; i++) {
         try {
-          data.set(await mfReadBlockGen1({ block: i }), i * 16)
+          data.set(await mfReadBlockGen1a({ block: i }), i * 16)
           success[i] = 1
         } catch (err) {}
       }
       return { data, success }
     }
 
-    const mfReadCardGen1 = async ({ sectorMax = 16 } = {}) => {
+    const mfReadCardGen1a = async ({ sectorMax = 16 } = {}) => {
       const data = new Packet(sectorMax * 64)
-      const success = _.times(sectorMax * 64, () => 0)
+      const success = _.times(sectorMax * 4, () => 0)
       for (let i = 0; i < sectorMax * 4; i++) {
         try {
-          data.set(await mfReadBlockGen1({ block: i }), i * 16)
+          data.set(await mfReadBlockGen1a({ block: i }), i * 16)
           success[i] = 1
         } catch (err) {}
       }
@@ -264,7 +264,7 @@ export default class Pm3Hf14a {
     }
 
     // https://github.com/RfidResearchGroup/proxmark3/blob/master/client/src/cmdhfmf.c#L4472
-    const mfWriteBlockGen1 = async ({ block, data, wipe = false } = {}) => {
+    const mfWriteBlockGen1a = async ({ block, data, wipe = false } = {}) => {
       if (!Packet.isLen(data, 16)) throw new TypeError('invalid data')
       // MAGIC_SINGLE = (MAGIC_WUPC | MAGIC_HALT | MAGIC_INIT | MAGIC_OFF) // 0x1E
       // MAGIC_WIPE = 0x40
@@ -279,26 +279,26 @@ export default class Pm3Hf14a {
       })
     }
 
-    const mfWriteSectorGen1 = async ({ sector = 16, data } = {}) => {
+    const mfWriteSectorGen1a = async ({ sector = 16, data } = {}) => {
       if (!Packet.isLen(data, 64)) throw new TypeError('invalid data')
       const blocks = data.chunk(16)
       const success = [0, 0, 0, 0]
       for (let i = 0; i < blocks.length; i++) {
         try {
-          await mfWriteBlockGen1({ block: sector * 4 + i, data: blocks[i] })
+          await mfWriteBlockGen1a({ block: sector * 4 + i, data: blocks[i] })
           success[i] = 1
         } catch (err) {}
       }
       return success
     }
 
-    const mfWriteCardGen1 = async ({ sectorMax = 16, data } = {}) => {
+    const mfWriteCardGen1a = async ({ sectorMax = 16, data } = {}) => {
       if (!Packet.isLen(data, sectorMax * 64)) throw new TypeError('invalid data')
       const blocks = data.chunk(16)
       const success = _.times(sectorMax * 4, () => 0)
       for (let i = 0; i < blocks.length; i++) {
         try {
-          await mfWriteBlockGen1({ block: i, data: blocks[i] })
+          await mfWriteBlockGen1a({ block: i, data: blocks[i] })
           success[i] = 1
         } catch (err) {}
       }
@@ -540,21 +540,21 @@ export default class Pm3Hf14a {
       mfKeysCheck,
       mfKeysUniq,
       mfReadBlock,
-      mfReadBlockGen1,
+      mfReadBlockGen1a,
       mfReadBlockKeyBA,
       mfReadCardByKeys,
-      mfReadCardGen1,
+      mfReadCardGen1a,
       mfReadSector,
-      mfReadSectorGen1,
+      mfReadSectorGen1a,
       mfReadSectorKeyBA,
       mfSimulateCard,
       mfWriteBlock,
-      mfWriteBlockGen1,
+      mfWriteBlockGen1a,
       mfWriteBlockKeyBA,
       mfWriteCardByKeys,
-      mfWriteCardGen1,
+      mfWriteCardGen1a,
       mfWriteSector,
-      mfWriteSectorGen1,
+      mfWriteSectorGen1a,
       mfWriteSectorKeyBA,
       selectCard,
       sendRaw,
