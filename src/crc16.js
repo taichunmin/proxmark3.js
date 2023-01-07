@@ -67,6 +67,7 @@ const crc16Fast = (data, poly, crc, refin, refout) => {
 }
 
 // http://www.sunshine2k.de/coding/javascript/crc/crc_js.html
+// https://crccalc.com/
 export const crc16A = data => crc2packet(crc16Fast(data, 'CCITT', 0xC6C6, true, true)) // 14443a
 export const crc16Arc = data => crc2packet(crc16Fast(data, 'ARC', 0x0000, true, true)) // arc
 export const crc16AugCcitt = data => crc2packet(crc16Fast(data, 'CCITT', 0x1D0F, false, false)) // arg ccitt
